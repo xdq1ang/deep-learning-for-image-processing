@@ -2,7 +2,7 @@ lxml
 matplotlib
 numpy
 tqdm
-pycocotools
+pycocotools-windows
 Pillow
 torch==1.10
 torchvision==0.11.1
