@@ -140,9 +140,9 @@ def main(parser_data):
     print('Using %g dataloader workers' % nw)
 
     # load validation data set
-    val_dataset = CocoDetection(data_root, "val", data_transform["val"])
+    # val_dataset = CocoDetection(data_root, "val", data_transform["val"])
     # VOCdevkit -> VOC2012 -> ImageSets -> Main -> val.txt
-    # val_dataset = VOCInstances(data_root, year="2012", txt_name="val.txt", transforms=data_transform["val"])
+    val_dataset = VOCInstances(data_root, year="2012", txt_name="val.txt", transforms=data_transform["val"])
     val_dataset_loader = torch.utils.data.DataLoader(val_dataset,
                                                      batch_size=batch_size,
                                                      shuffle=False,
@@ -199,10 +199,10 @@ if __name__ == "__main__":
     parser.add_argument('--device', default='cuda', help='device')
 
     # 检测目标类别数(不包含背景)
-    parser.add_argument('--num-classes', type=int, default=90, help='number of classes')
+    parser.add_argument('--num-classes', type=int, default=20, help='number of classes')
 
     # 数据集的根目录
-    parser.add_argument('--data-path', default='/data/coco2017', help='dataset root')
+    parser.add_argument('--data-path', default='data/VOCdevkit', help='dataset root')
 
     # 训练好的权重文件
     parser.add_argument('--weights-path', default='./save_weights/model_25.pth', type=str, help='training weights')
@@ -211,7 +211,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', default=1, type=int, metavar='N',
                         help='batch size when validation.')
     # 类别索引和类别名称对应关系
-    parser.add_argument('--label-json-path', type=str, default="coco91_indices.json")
+    parser.add_argument('--label-json-path', type=str, default="pascal_voc_indices.json")
 
     args = parser.parse_args()
 
