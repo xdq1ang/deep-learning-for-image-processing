@@ -26,7 +26,7 @@ def create_model(num_classes, load_pretrain_weights=True):
 
     if load_pretrain_weights:
         # coco weights url: "https://download.pytorch.org/models/maskrcnn_resnet50_fpn_coco-bf2d0c1e.pth"
-        weights_dict = torch.load("./maskrcnn_resnet50_fpn_coco.pth", map_location="cpu")
+        weights_dict = torch.load("preTrainedModel/maskrcnn_resnet50_fpn_coco.pth", map_location="cpu")
         for k in list(weights_dict.keys()):
             if ("box_predictor" in k) or ("mask_fcn_logits" in k):
                 del weights_dict[k]
@@ -42,8 +42,10 @@ def main(args):
 
     # 用来保存coco_info的文件
     now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    det_results_file = f"det_results{now}.txt"
-    seg_results_file = f"seg_results{now}.txt"
+    if not os.path.exists(args.results_file):
+        os.makedirs(args.results_file)
+    det_results_file = os.path.join(args.results_file, f"det_results{now}.txt")
+    seg_results_file = os.path.join(args.results_file,f"seg_results{now}.txt")
 
     data_transform = {
         "train": transforms.Compose([transforms.ToTensor(),
@@ -172,17 +174,21 @@ def main(args):
             'epoch': epoch}
         if args.amp:
             save_files["scaler"] = scaler.state_dict()
-        torch.save(save_files, "./save_weights/model_{}.pth".format(epoch))
+        
+        save_anme = os.path.join(args.results_file,"save_weights")
+        if not os.path.exists(save_anme):
+            os.makedirs(save_anme)
+        torch.save(save_files, os.path.join(save_anme, "model_{}.pth".format(epoch)))
 
     # plot loss and lr curve
     if len(train_loss) != 0 and len(learning_rate) != 0:
         from plot_curve import plot_loss_and_lr
-        plot_loss_and_lr(train_loss, learning_rate)
+        plot_loss_and_lr(train_loss, learning_rate, args.results_file)
 
     # plot mAP curve
     if len(val_map) != 0:
         from plot_curve import plot_map
-        plot_map(val_map)
+        plot_map(val_map, args.results_file)
 
 
 if __name__ == "__main__":
@@ -204,7 +210,7 @@ if __name__ == "__main__":
     # 指定接着从哪个epoch数开始训练
     parser.add_argument('--start_epoch', default=0, type=int, help='start epoch')
     # 训练的总epoch数
-    parser.add_argument('--epochs', default=26, type=int, metavar='N',
+    parser.add_argument('--epochs', default=1, type=int, metavar='N',
                         help='number of total epochs to run')
     # 学习率
     parser.add_argument('--lr', default=0.004, type=float,
@@ -229,6 +235,7 @@ if __name__ == "__main__":
     parser.add_argument("--pretrain", type=bool, default=True, help="load COCO pretrain weights.")
     # 是否使用混合精度训练(需要GPU支持混合精度)
     parser.add_argument("--amp", default=False, help="Use torch.cuda.amp for mixed precision training")
+    parser.add_argument("--results_file", default="results_file", help="results_file")
 
     args = parser.parse_args()
     print(args)
