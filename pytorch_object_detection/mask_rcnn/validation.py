@@ -119,6 +119,10 @@ def save_info(coco_evaluator,
 
 
 def main(parser_data):
+    weights_name = args.weights_path.split("/")[-1][:-4]
+    save_path = os.path.join(args.results_file,weights_name)
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
     device = torch.device(parser_data.device if torch.cuda.is_available() else "cpu")
     print("Using {} device training.".format(device.type))
 
@@ -165,8 +169,8 @@ def main(parser_data):
     # evaluate on the val dataset
     cpu_device = torch.device("cpu")
 
-    det_metric = EvalCOCOMetric(val_dataset.coco, "bbox", "det_results.json")
-    seg_metric = EvalCOCOMetric(val_dataset.coco, "segm", "seg_results.json")
+    det_metric = EvalCOCOMetric(val_dataset.coco, "bbox", os.path.join(save_path,"det_results.json"))
+    seg_metric = EvalCOCOMetric(val_dataset.coco, "segm", os.path.join(save_path,"seg_results.json"))
     model.eval()
     with torch.no_grad():
         for image, targets in tqdm(val_dataset_loader, desc="validation..."):
@@ -185,8 +189,8 @@ def main(parser_data):
     det_metric.evaluate()
     seg_metric.evaluate()
 
-    save_info(det_metric.coco_evaluator, category_index, "det_record_mAP.txt")
-    save_info(seg_metric.coco_evaluator, category_index, "seg_record_mAP.txt")
+    save_info(det_metric.coco_evaluator, category_index, os.path.join(save_path, "det_record_mAP.txt"))
+    save_info(seg_metric.coco_evaluator, category_index, os.path.join(save_path,"seg_record_mAP.txt"))
 
 
 if __name__ == "__main__":
@@ -212,6 +216,7 @@ if __name__ == "__main__":
                         help='batch size when validation.')
     # 类别索引和类别名称对应关系
     parser.add_argument('--label-json-path', type=str, default="pascal_voc_indices.json")
+    parser.add_argument("--results_file", default="results_file", help="results_file")
 
     args = parser.parse_args()
 

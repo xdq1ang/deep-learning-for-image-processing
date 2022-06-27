@@ -1,6 +1,7 @@
 import math
 import sys
 import time
+import os
 
 import torch
 
@@ -66,14 +67,14 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch,
 
 
 @torch.no_grad()
-def evaluate(model, data_loader, device):
+def evaluate(model, data_loader, device, results_file):
     cpu_device = torch.device("cpu")
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = "Test: "
 
-    det_metric = EvalCOCOMetric(data_loader.dataset.coco, iou_type="bbox", results_file_name="det_results.json")
-    seg_metric = EvalCOCOMetric(data_loader.dataset.coco, iou_type="segm", results_file_name="seg_results.json")
+    det_metric = EvalCOCOMetric(data_loader.dataset.coco, iou_type="bbox", results_file_name=os.path.join(results_file, "det_results.json"))
+    seg_metric = EvalCOCOMetric(data_loader.dataset.coco, iou_type="segm", results_file_name=os.path.join(results_file, "seg_results.json"))
     for image, targets in metric_logger.log_every(data_loader, 100, header):
         image = list(img.to(device) for img in image)
 

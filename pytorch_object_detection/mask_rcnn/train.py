@@ -20,7 +20,7 @@ def create_model(num_classes, load_pretrain_weights=True):
     # backbone = resnet50_fpn_backbone(norm_layer=FrozenBatchNorm2d,
     #                                  trainable_layers=3)
     # resnet50 imagenet weights url: https://download.pytorch.org/models/resnet50-0676ba61.pth
-    backbone = resnet50_fpn_backbone(pretrain_path="resnet50.pth", trainable_layers=3)
+    backbone = resnet50_fpn_backbone(pretrain_path="preTrainedModel/resnet50.pth", trainable_layers=3)
 
     model = MaskRCNN(backbone, num_classes=num_classes)
 
@@ -148,7 +148,7 @@ def main(args):
         lr_scheduler.step()
 
         # evaluate on the test dataset
-        det_info, seg_info = utils.evaluate(model, val_data_loader, device=device)
+        det_info, seg_info = utils.evaluate(model, val_data_loader, device=device, results_file = args.results_file)
 
         # write detection into txt
         with open(det_results_file, "a") as f:
