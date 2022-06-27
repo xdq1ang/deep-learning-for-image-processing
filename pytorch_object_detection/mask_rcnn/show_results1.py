@@ -57,15 +57,14 @@ PASCAL_VOC_INSTANCE_CATEGORY_NAMES = [
 
 
 def get_prediction(pred, threshold):  # 定义模型，并根据阈值过滤结果
-    print('pred')
-    print(pred)
     pred_score = list(pred[0]['scores'].detach().numpy())
-    pred_t = [pred_score.index(x) for x in pred_score if x > threshold][-1]
-    print("masks>0.5")
-    print(pred[0]['masks'] > 0.5)
+    try: 
+        pred_t = [pred_score.index(x) for x in pred_score if x > threshold][-1]
+    except IndexError as e:
+        print("未检测到任何对象！")
+        return [],[],[],[]
+
     masks = (pred[0]['masks'] > 0.5).squeeze().detach().cpu().numpy()
-    print("this is masks")
-    print(masks)
     pred_class = [PASCAL_VOC_INSTANCE_CATEGORY_NAMES[i] for i in list(pred[0]['labels'].numpy())]
     pred_boxes = [[(i[0], i[1]), (i[2], i[3])] for i in list(pred[0]['boxes'].detach().numpy())]
     masks = masks[:pred_t + 1]
@@ -90,14 +89,14 @@ def random_colour_masks(image):
     return coloured_mask, randcol
 
 
-def instance_segmentation_api(val_dataset_loader, threshold=0.5, rect_th=3, text_size=0.5, text_th=1):  # 进行目标检测
+def instance_segmentation_api(save_root, val_dataset_loader, threshold=0.5, rect_th=3, text_size=0.5, text_th=1):  # 进行目标检测
     with torch.no_grad():
         for image, targets in tqdm(val_dataset_loader, desc="validation..."):
             outputs = model(image)
+            img = np.array(ToPILImage()(image[0]))
             masks, boxes, pred_cls, pred_score = get_prediction(outputs, threshold)  # 调用模型
             for i in range(len(masks)):
                 rgb_mask, randcol = random_colour_masks(masks[i])  # 使用随机颜色为模型的掩码区进行填充。
-                img = np.array(ToPILImage()(image[0]))
                 img = cv2.addWeighted(img, 1, rgb_mask, 0.5, 0)
                 # 元组里面有小数，需要转化为整数 否则报错
                 T1, T2 = boxes[i][0], boxes[i][1]
@@ -109,13 +108,16 @@ def instance_segmentation_api(val_dataset_loader, threshold=0.5, rect_th=3, text
                 # # putText各参数依次是：图片，添加的文字，左上角坐标，字体，字体大小，颜色黑，字体粗细
                 cv2.putText(img, pred_cls[i] + " " + str(pred_score[i]), (x1, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, text_size,
                             randcol, thickness=text_th)
-            plt.figure(figsize=(20, 30))
-            plt.imshow(img)
-            plt.xticks([])
-            plt.yticks([])
-            plt.show()
+                
+            
+            save_name = os.path.join(save_root, str(len(os.listdir(save_root))+1)+".png")
+            cv2.imwrite(save_name,img)
+
 
 
 # 显示模型结果
 if __name__ == "__main__":
-    instance_segmentation_api(val_dataset_loader)
+    save_root = "show_results"
+    if not os.path.exists(save_root):
+        os.mkdir(save_root)
+    instance_segmentation_api(save_root, val_dataset_loader)
