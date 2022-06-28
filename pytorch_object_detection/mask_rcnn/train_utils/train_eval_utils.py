@@ -9,9 +9,10 @@ import train_utils.distributed_utils as utils
 from .coco_eval import EvalCOCOMetric
 
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch,
+def train_one_epoch(model, model_dis, optimizer, optimizer_dis, data_loader, tar_train_data_loader, device, epoch,
                     print_freq=50, warmup=False, scaler=None):
     model.train()
+    model_dis.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
@@ -28,11 +29,55 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch,
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
+        bce_loss = torch.nn.BCEWithLogitsLoss()
+        source_label = 1
+        target_label = 0
+
+        # 获取目标数据集枚举类
+        tar_trainloader_iter = enumerate(metric_logger.log_every(tar_train_data_loader, print_freq, header))
+        # 辨别器不计算梯度
+        for param in model_dis.parameters():
+            param.requires_grad = False
         # 混合精度训练上下文管理器，如果在CPU环境中不起任何作用
         with torch.cuda.amp.autocast(enabled=scaler is not None):
-            loss_dict = model(images, targets)
-
+            # 训练mask_rcnn
+            # 在源域数据上监督训练（目标检测 + 语义分割）
+            loss_dict, mask_logits = model(images, targets)
             losses = sum(loss for loss in loss_dict.values())
+
+            # 在目标域数据上进行目标检测监督训练 + 语义分割对抗训练
+            _ ,[tar_images,tar_targets] = next(tar_trainloader_iter)
+            tar_images = list(image.to(device) for image in tar_images)
+            tar_targets = [{k: v.to(device) for k, v in t.items()} for t in tar_targets]
+            tar_loss_dict, tar_mask_logits = model(tar_images, tar_targets)
+            del tar_loss_dict['loss_mask']
+            tar_losses = sum(loss for loss in tar_loss_dict.values())
+
+            losses = losses + tar_losses
+            # 目标数据集对抗训练，使得特征提取器在目标域提取与源域相似的特征
+            tar_dis_out = model_dis(tar_mask_logits)
+            src_adv_loss = bce_loss(tar_dis_out, torch.FloatTensor(tar_dis_out.data.size()).fill_(source_label).cuda())
+            src_adv_loss.backward(retain_graph=True)
+            # 训练鉴别器，使得鉴别器具有鉴别能力
+            for param in model_dis.parameters():
+                param.requires_grad = True
+            # 鉴别器在源域训练
+            mask_logits = mask_logits.detach()
+            src_dis_out = model_dis(mask_logits)
+            src_dis_loss = bce_loss(src_dis_out, torch.FloatTensor(src_dis_out.data.size()).fill_(source_label).to(device))
+            src_dis_loss.backward()
+            # 鉴别器在目标域训练
+            tar_mask_logits = tar_mask_logits.detach()
+            tar_dis_out = model_dis(tar_mask_logits)
+            tar_dis_loss = bce_loss(tar_dis_out, torch.FloatTensor(tar_dis_out.data.size()).fill_(target_label).to(device))
+            tar_dis_loss.backward()
+
+            dis_loss = src_dis_loss + tar_dis_loss
+
+            # 更新优化器
+            optimizer_dis.step()
+            optimizer_dis.zero_grad()
+
 
         # reduce losses over all GPUs for logging purpose
         loss_dict_reduced = utils.reduce_dict(loss_dict)

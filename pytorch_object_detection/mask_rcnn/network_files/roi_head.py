@@ -557,4 +557,4 @@ class RoIHeads(torch.nn.Module):
 
             losses.update(loss_mask)
 
-        return result, losses
+        return result, mask_logits, losses

@@ -6,6 +6,7 @@ from torchvision.ops.misc import FrozenBatchNorm2d
 
 import transforms
 from network_files import MaskRCNN
+from discriminator.discriminator import EightwayASADiscriminator
 from backbone import resnet50_fpn_backbone
 from my_dataset_coco import CocoDetection
 from my_dataset_voc import VOCInstances
@@ -60,6 +61,7 @@ def main(args):
     # train_dataset = CocoDetection(data_root, "train", data_transform["train"])
     # VOCdevkit -> VOC2012 -> ImageSets -> Main -> train.txt
     train_dataset = VOCInstances(data_root, year="2012", txt_name="train.txt", transforms=data_transform["train"])
+    tar_train_dataset = VOCInstances(data_root, year="2012", txt_name="train.txt", transforms=data_transform["train"])
     train_sampler = None
 
     # 是否按图片相似高宽比采样图片组成batch
@@ -83,8 +85,19 @@ def main(args):
                                                         pin_memory=True,
                                                         num_workers=nw,
                                                         collate_fn=train_dataset.collate_fn)
+        tar_train_data_loader = torch.utils.data.DataLoader(tar_train_dataset,
+                                                        batch_sampler=train_batch_sampler,
+                                                        pin_memory=True,
+                                                        num_workers=nw,
+                                                        collate_fn=train_dataset.collate_fn)
     else:
         train_data_loader = torch.utils.data.DataLoader(train_dataset,
+                                                        batch_size=batch_size,
+                                                        shuffle=True,
+                                                        pin_memory=True,
+                                                        num_workers=nw,
+                                                        collate_fn=train_dataset.collate_fn)
+        tar_train_data_loader = torch.utils.data.DataLoader(tar_train_dataset,
                                                         batch_size=batch_size,
                                                         shuffle=True,
                                                         pin_memory=True,
@@ -96,7 +109,14 @@ def main(args):
     # val_dataset = CocoDetection(data_root, "val", data_transform["val"])
     # VOCdevkit -> VOC2012 -> ImageSets -> Main -> val.txt
     val_dataset = VOCInstances(data_root, year="2012", txt_name="val.txt", transforms=data_transform["val"])
+    tar_val_dataset = VOCInstances(data_root, year="2007", txt_name="val.txt", transforms=data_transform["val"])
     val_data_loader = torch.utils.data.DataLoader(val_dataset,
+                                                  batch_size=1,
+                                                  shuffle=False,
+                                                  pin_memory=True,
+                                                  num_workers=nw,
+                                                  collate_fn=train_dataset.collate_fn)
+    tar_val_data_loader = torch.utils.data.DataLoader(tar_val_dataset,
                                                   batch_size=1,
                                                   shuffle=False,
                                                   pin_memory=True,
@@ -105,7 +125,9 @@ def main(args):
 
     # create model num_classes equal background + classes
     model = create_model(num_classes=args.num_classes + 1, load_pretrain_weights=args.pretrain)
+    model_dis = EightwayASADiscriminator(num_classes = args.num_classes + 1)
     model.to(device)
+    model_dis.to(device)
 
     train_loss = []
     learning_rate = []
@@ -116,6 +138,8 @@ def main(args):
     optimizer = torch.optim.SGD(params, lr=args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
+    optimizer_dis = torch.optim.Adam(model_dis.parameters(), lr=args.lr,
+                                    betas=(0.9,0.99))
 
     scaler = torch.cuda.amp.GradScaler() if args.amp else None
 
@@ -138,7 +162,7 @@ def main(args):
 
     for epoch in range(args.start_epoch, args.epochs):
         # train for one epoch, printing every 50 iterations
-        mean_loss, lr = utils.train_one_epoch(model, optimizer, train_data_loader,
+        mean_loss, lr = utils.train_one_epoch(model, model_dis, optimizer, optimizer_dis, train_data_loader,tar_train_data_loader,
                                               device, epoch, print_freq=50,
                                               warmup=True, scaler=scaler)
         train_loss.append(mean_loss.item())
@@ -210,7 +234,7 @@ if __name__ == "__main__":
     # 指定接着从哪个epoch数开始训练
     parser.add_argument('--start_epoch', default=0, type=int, help='start epoch')
     # 训练的总epoch数
-    parser.add_argument('--epochs', default=1, type=int, metavar='N',
+    parser.add_argument('--epochs', default=40, type=int, metavar='N',
                         help='number of total epochs to run')
     # 学习率
     parser.add_argument('--lr', default=0.004, type=float,
@@ -229,7 +253,7 @@ if __name__ == "__main__":
     # 针对torch.optim.lr_scheduler.MultiStepLR的参数
     parser.add_argument('--lr-gamma', default=0.1, type=float, help='decrease lr by a factor of lr-gamma')
     # 训练的batch size(如果内存/GPU显存充裕，建议设置更大)
-    parser.add_argument('--batch_size', default=4, type=int, metavar='N',
+    parser.add_argument('--batch_size', default=2, type=int, metavar='N',
                         help='batch size when training.')
     parser.add_argument('--aspect-ratio-group-factor', default=3, type=int)
     parser.add_argument("--pretrain", type=bool, default=True, help="load COCO pretrain weights.")
