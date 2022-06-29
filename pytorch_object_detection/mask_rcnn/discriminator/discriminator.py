@@ -29,7 +29,7 @@ class FCDiscriminator(nn.Module):
 
 
 class EightwayASADiscriminator(nn.Module):
-    def __init__(self, num_classes, ndf=64,ppm = "ppm"):
+    def __init__(self, num_classes, ndf = 64,ppm = None):
         super(EightwayASADiscriminator, self).__init__()
         self.ppm = ppm
         self.conv1 = nn.Conv2d(8*num_classes, ndf, kernel_size=4, stride=1, padding=1)
@@ -59,7 +59,8 @@ class EightwayASADiscriminator(nn.Module):
         x = self.leaky_relu(x)
         x = self.conv4(x)
         x = self.leaky_relu(x)
-        x = self.ppm(x)
+        if self.ppm != None:
+            x = self.ppm(x)
         x = self.classifier(x)
         return x
 

@@ -9,35 +9,39 @@ import train_utils.distributed_utils as utils
 from .coco_eval import EvalCOCOMetric
 
 
-def train_one_epoch(model, model_dis, optimizer, optimizer_dis, data_loader, tar_train_data_loader, device, epoch,
+def train_one_epoch(model, model_dis, optimizer, optimizer_dis, data_loader, tar_train_data_loader, device, epoch, epochs,
                     print_freq=50, warmup=False, scaler=None):
     model.train()
-    model_dis.train()
+    if model_dis != None:
+        model_dis.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
+    bce_loss = torch.nn.BCEWithLogitsLoss()
+    source_label = 1
+    target_label = 0
+    model_dis_alpah = 0.1*(epoch+1)/epochs
+    one_epoch_dis_loss = 0
+    one_epoch_adv_loss = 0
+    train_dis = True
 
     lr_scheduler = None
     if epoch == 0 and warmup is True:  # 当训练第一轮（epoch=0）时，启用warmup训练方式，可理解为热身训练
         warmup_factor = 1.0 / 1000
         warmup_iters = min(1000, len(data_loader) - 1)
-
         lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
+    
+    # 获取目标数据集枚举类
+    tar_trainloader_iter = enumerate(metric_logger.log_every(tar_train_data_loader, print_freq, header))
+
+
 
     mloss = torch.zeros(1).to(device)  # mean losses
     for i, [images, targets] in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
-        bce_loss = torch.nn.BCEWithLogitsLoss()
-        source_label = 1
-        target_label = 0
 
-        # 获取目标数据集枚举类
-        tar_trainloader_iter = enumerate(metric_logger.log_every(tar_train_data_loader, print_freq, header))
-        # 辨别器不计算梯度
-        for param in model_dis.parameters():
-            param.requires_grad = False
         # 混合精度训练上下文管理器，如果在CPU环境中不起任何作用
         with torch.cuda.amp.autocast(enabled=scaler is not None):
             # 训练mask_rcnn
@@ -53,30 +57,41 @@ def train_one_epoch(model, model_dis, optimizer, optimizer_dis, data_loader, tar
             del tar_loss_dict['loss_mask']
             tar_losses = sum(loss for loss in tar_loss_dict.values())
 
-            losses = losses + tar_losses
-            # 目标数据集对抗训练，使得特征提取器在目标域提取与源域相似的特征
-            tar_dis_out = model_dis(tar_mask_logits)
-            src_adv_loss = bce_loss(tar_dis_out, torch.FloatTensor(tar_dis_out.data.size()).fill_(source_label).cuda())
-            src_adv_loss.backward(retain_graph=True)
-            # 训练鉴别器，使得鉴别器具有鉴别能力
-            for param in model_dis.parameters():
-                param.requires_grad = True
-            # 鉴别器在源域训练
-            mask_logits = mask_logits.detach()
-            src_dis_out = model_dis(mask_logits)
-            src_dis_loss = bce_loss(src_dis_out, torch.FloatTensor(src_dis_out.data.size()).fill_(source_label).to(device))
-            src_dis_loss.backward()
-            # 鉴别器在目标域训练
-            tar_mask_logits = tar_mask_logits.detach()
-            tar_dis_out = model_dis(tar_mask_logits)
-            tar_dis_loss = bce_loss(tar_dis_out, torch.FloatTensor(tar_dis_out.data.size()).fill_(target_label).to(device))
-            tar_dis_loss.backward()
+            losses = losses + model_dis_alpah*tar_losses
 
-            dis_loss = src_dis_loss + tar_dis_loss
+            # 判断是否进行对抗
+            if tar_mask_logits.shape[0] > 50:
+                train_dis = False
 
-            # 更新优化器
-            optimizer_dis.step()
-            optimizer_dis.zero_grad()
+            if train_dis and model_dis != None:
+                # 辨别器不计算梯度
+                for param in model_dis.parameters():
+                    param.requires_grad = False
+                # 目标数据集对抗训练，使得特征提取器在目标域提取与源域相似的特征
+                tar_dis_out = model_dis(tar_mask_logits)
+                src_adv_loss = bce_loss(tar_dis_out, torch.FloatTensor(tar_dis_out.data.size()).fill_(source_label).cuda())
+                src_adv_loss *= model_dis_alpah
+
+                # 训练鉴别器，使得鉴别器具有鉴别能力
+                for param in model_dis.parameters():
+                    param.requires_grad = True
+                # 鉴别器在源域训练
+                mask_logits = mask_logits.detach()
+                src_dis_out = model_dis(mask_logits)
+                src_dis_loss = bce_loss(src_dis_out, torch.FloatTensor(src_dis_out.data.size()).fill_(source_label).to(device))
+                src_dis_loss *= model_dis_alpah
+
+                # 鉴别器在目标域训练
+                tar_mask_logits = tar_mask_logits.detach()
+                tar_dis_out = model_dis(tar_mask_logits)
+                tar_dis_loss = bce_loss(tar_dis_out, torch.FloatTensor(tar_dis_out.data.size()).fill_(target_label).to(device))
+                tar_dis_loss *= model_dis_alpah
+
+
+                dis_loss = src_dis_loss + tar_dis_loss
+
+                one_epoch_adv_loss += src_adv_loss.item()
+                one_epoch_dis_loss += dis_loss.item()
 
 
         # reduce losses over all GPUs for logging purpose
@@ -93,13 +108,24 @@ def train_one_epoch(model, model_dis, optimizer, optimizer_dis, data_loader, tar
             sys.exit(1)
 
         optimizer.zero_grad()
+        if model_dis != None:
+            optimizer_dis.zero_grad()
+
         if scaler is not None:
             scaler.scale(losses).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
-            losses.backward()
+            losses.backward(retain_graph=True)
+            
+            if train_dis and model_dis != None:
+                src_adv_loss.backward()
+                src_dis_loss.backward()
+                tar_dis_loss.backward()
+                optimizer_dis.step()
+            
             optimizer.step()
+
 
         if lr_scheduler is not None:  # 第一轮使用warmup训练方式
             lr_scheduler.step()
@@ -107,7 +133,10 @@ def train_one_epoch(model, model_dis, optimizer, optimizer_dis, data_loader, tar
         metric_logger.update(loss=losses_reduced, **loss_dict_reduced)
         now_lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=now_lr)
+    
 
+    print("adv_loss: ",one_epoch_adv_loss/(i+1))
+    print("dis loss: ",one_epoch_dis_loss/(i+1))
     return mloss, now_lr
 
 

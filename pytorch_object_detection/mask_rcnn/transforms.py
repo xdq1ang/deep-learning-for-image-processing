@@ -1,5 +1,7 @@
 import random
 from torchvision.transforms import functional as F
+from torchvision import transforms
+from PIL import Image
 
 
 class Compose(object):
@@ -35,4 +37,36 @@ class RandomHorizontalFlip(object):
             target["boxes"] = bbox
             if "masks" in target:
                 target["masks"] = target["masks"].flip(-1)
+        return image, target
+
+
+
+
+
+class Resize(object):
+    def __init__(self, nh, nw):
+        self.nw = nw
+        self.nh = nh 
+
+    def __call__(self, image, target):
+        """
+        修改 box
+        :param filename_jpg: 图片名
+        :param box: 原box
+        :param nw: 改变后的宽度
+        :param nh: 改变后的高度
+        :return:
+        """
+        c, ih, iw = image.shape        
+        if ih > 256 and iw >512:
+            # 对图像进行缩放并且进行长和宽的扭曲
+            image = transforms.Resize((self.nh, self.nw))(image)
+            target["masks"] = transforms.Resize((self.nh,self.nw),Image.NEAREST)(target["masks"])
+            # 将box进行调整
+            for boxx in target["boxes"]:
+                boxx[0] = int(int(boxx[0]) * (self.nw / iw))
+                boxx[1] = int(int(boxx[1]) * (self.nh / ih))
+                boxx[2] = int(int(boxx[2]) * (self.nw / iw))
+                boxx[3] = int(int(boxx[3]) * (self.nh / ih))
+
         return image, target

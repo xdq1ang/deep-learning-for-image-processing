@@ -1,8 +1,10 @@
 import os
 import datetime
+from cv2 import resize
 
 import torch
 from torchvision.ops.misc import FrozenBatchNorm2d
+from PIL import Image
 
 import transforms
 from network_files import MaskRCNN
@@ -50,8 +52,10 @@ def main(args):
 
     data_transform = {
         "train": transforms.Compose([transforms.ToTensor(),
-                                     transforms.RandomHorizontalFlip(0.5)]),
-        "val": transforms.Compose([transforms.ToTensor()])
+                                     transforms.RandomHorizontalFlip(0.5),
+                                     transforms.Resize(128,200)]),
+        "val": transforms.Compose([transforms.ToTensor(),
+                                  transforms.Resize(128,200)])
     }
 
     data_root = args.data_path
@@ -109,7 +113,7 @@ def main(args):
     # val_dataset = CocoDetection(data_root, "val", data_transform["val"])
     # VOCdevkit -> VOC2012 -> ImageSets -> Main -> val.txt
     val_dataset = VOCInstances(data_root, year="2012", txt_name="val.txt", transforms=data_transform["val"])
-    tar_val_dataset = VOCInstances(data_root, year="2007", txt_name="val.txt", transforms=data_transform["val"])
+    tar_val_dataset = VOCInstances(data_root, year="2012", txt_name="val.txt", transforms=data_transform["val"])
     val_data_loader = torch.utils.data.DataLoader(val_dataset,
                                                   batch_size=1,
                                                   shuffle=False,
@@ -125,9 +129,14 @@ def main(args):
 
     # create model num_classes equal background + classes
     model = create_model(num_classes=args.num_classes + 1, load_pretrain_weights=args.pretrain)
-    model_dis = EightwayASADiscriminator(num_classes = args.num_classes + 1)
     model.to(device)
-    model_dis.to(device)
+    if args.train_dis:
+        model_dis = EightwayASADiscriminator(num_classes = args.num_classes + 1)
+        model_dis.to(device)
+        optimizer_dis = torch.optim.Adam(model_dis.parameters(), lr=args.lr, betas=(0.9,0.99))
+    else:
+        model_dis = None
+        optimizer_dis = None
 
     train_loss = []
     learning_rate = []
@@ -138,8 +147,6 @@ def main(args):
     optimizer = torch.optim.SGD(params, lr=args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
-    optimizer_dis = torch.optim.Adam(model_dis.parameters(), lr=args.lr,
-                                    betas=(0.9,0.99))
 
     scaler = torch.cuda.amp.GradScaler() if args.amp else None
 
@@ -163,7 +170,7 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         # train for one epoch, printing every 50 iterations
         mean_loss, lr = utils.train_one_epoch(model, model_dis, optimizer, optimizer_dis, train_data_loader,tar_train_data_loader,
-                                              device, epoch, print_freq=50,
+                                              device, epoch, args.epochs, print_freq=50,
                                               warmup=True, scaler=scaler)
         train_loss.append(mean_loss.item())
         learning_rate.append(lr)
@@ -260,6 +267,7 @@ if __name__ == "__main__":
     # 是否使用混合精度训练(需要GPU支持混合精度)
     parser.add_argument("--amp", default=False, help="Use torch.cuda.amp for mixed precision training")
     parser.add_argument("--results_file", default="results_file", help="results_file")
+    parser.add_argument("--train_dis", default = False, help="train_dis")
 
     args = parser.parse_args()
     print(args)
