@@ -92,7 +92,7 @@ def random_colour_masks(image):
 def instance_segmentation_api(save_root, val_dataset_loader, threshold=0.5, rect_th=3, text_size=0.5, text_th=1):  # 进行目标检测
     with torch.no_grad():
         for image, targets in tqdm(val_dataset_loader, desc="validation..."):
-            outputs = model(image)
+            _, _, outputs = model(image)
             img = np.array(ToPILImage()(image[0]))
             masks, boxes, pred_cls, pred_score = get_prediction(outputs, threshold)  # 调用模型
             for i in range(len(masks)):

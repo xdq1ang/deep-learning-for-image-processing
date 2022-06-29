@@ -23,13 +23,13 @@ def create_model(num_classes, load_pretrain_weights=True):
     # backbone = resnet50_fpn_backbone(norm_layer=FrozenBatchNorm2d,
     #                                  trainable_layers=3)
     # resnet50 imagenet weights url: https://download.pytorch.org/models/resnet50-0676ba61.pth
-    backbone = resnet50_fpn_backbone(pretrain_path="preTrainedModel/resnet50.pth", trainable_layers=3)
+    backbone = resnet50_fpn_backbone(pretrain_path="preTrainedModel/resnet50.pth", norm_layer=FrozenBatchNorm2d, trainable_layers=3)
 
     model = MaskRCNN(backbone, num_classes=num_classes)
 
     if load_pretrain_weights:
         # coco weights url: "https://download.pytorch.org/models/maskrcnn_resnet50_fpn_coco-bf2d0c1e.pth"
-        weights_dict = torch.load("preTrainedModel/maskrcnn_resnet50_fpn_coco.pth", map_location="cpu")
+        weights_dict = torch.load(r"save_weights\model_25.pth", map_location="cpu")
         for k in list(weights_dict.keys()):
             if ("box_predictor" in k) or ("mask_fcn_logits" in k):
                 del weights_dict[k]
@@ -53,9 +53,11 @@ def main(args):
     data_transform = {
         "train": transforms.Compose([transforms.ToTensor(),
                                      transforms.RandomHorizontalFlip(0.5),
-                                     transforms.Resize(128,200)]),
+                                    #  transforms.Resize(256,512)
+                                     ]),
         "val": transforms.Compose([transforms.ToTensor(),
-                                  transforms.Resize(128,200)])
+                                    #  transforms.Resize(256,512)
+                                  ])
     }
 
     data_root = args.data_path
@@ -65,8 +67,10 @@ def main(args):
     # train_dataset = CocoDetection(data_root, "train", data_transform["train"])
     # VOCdevkit -> VOC2012 -> ImageSets -> Main -> train.txt
     train_dataset = VOCInstances(data_root, year="2012", txt_name="train.txt", transforms=data_transform["train"])
-    tar_train_dataset = VOCInstances(data_root, year="2012", txt_name="train.txt", transforms=data_transform["train"])
+    tar_train_dataset = VOCInstances(data_root, year="2007", txt_name="train.txt", transforms=data_transform["train"])
     train_sampler = None
+    tar_train_sampler = None
+    
 
     # 是否按图片相似高宽比采样图片组成batch
     # 使用的话能够减小训练时所需GPU显存，默认使用
@@ -76,6 +80,14 @@ def main(args):
         group_ids = create_aspect_ratio_groups(train_dataset, k=args.aspect_ratio_group_factor)
         # 每个batch图片从同一高宽比例区间中取
         train_batch_sampler = GroupedBatchSampler(train_sampler, group_ids, args.batch_size)
+
+        tar_train_sampler = torch.utils.data.RandomSampler(tar_train_dataset)
+        # 统计所有图像高宽比例在bins区间中的位置索引
+        tar_group_ids = create_aspect_ratio_groups(tar_train_dataset, k=args.aspect_ratio_group_factor)
+        # 每个batch图片从同一高宽比例区间中取
+        tar_train_batch_sampler = GroupedBatchSampler(tar_train_sampler, tar_group_ids, args.batch_size)
+
+
 
     # 注意这里的collate_fn是自定义的，因为读取的数据包括image和targets，不能直接使用默认的方法合成batch
     batch_size = args.batch_size
@@ -90,10 +102,10 @@ def main(args):
                                                         num_workers=nw,
                                                         collate_fn=train_dataset.collate_fn)
         tar_train_data_loader = torch.utils.data.DataLoader(tar_train_dataset,
-                                                        batch_sampler=train_batch_sampler,
+                                                        batch_sampler=tar_train_batch_sampler,
                                                         pin_memory=True,
                                                         num_workers=nw,
-                                                        collate_fn=train_dataset.collate_fn)
+                                                        collate_fn=tar_train_dataset.collate_fn)
     else:
         train_data_loader = torch.utils.data.DataLoader(train_dataset,
                                                         batch_size=batch_size,
@@ -106,14 +118,14 @@ def main(args):
                                                         shuffle=True,
                                                         pin_memory=True,
                                                         num_workers=nw,
-                                                        collate_fn=train_dataset.collate_fn)
+                                                        collate_fn=tar_train_dataset.collate_fn)
 
     # load validation data set
     # coco2017 -> annotations -> instances_val2017.json
     # val_dataset = CocoDetection(data_root, "val", data_transform["val"])
     # VOCdevkit -> VOC2012 -> ImageSets -> Main -> val.txt
     val_dataset = VOCInstances(data_root, year="2012", txt_name="val.txt", transforms=data_transform["val"])
-    tar_val_dataset = VOCInstances(data_root, year="2012", txt_name="val.txt", transforms=data_transform["val"])
+    tar_val_dataset = VOCInstances(data_root, year="2007", txt_name="val.txt", transforms=data_transform["val"])
     val_data_loader = torch.utils.data.DataLoader(val_dataset,
                                                   batch_size=1,
                                                   shuffle=False,
@@ -125,7 +137,7 @@ def main(args):
                                                   shuffle=False,
                                                   pin_memory=True,
                                                   num_workers=nw,
-                                                  collate_fn=train_dataset.collate_fn)
+                                                  collate_fn=tar_train_dataset.collate_fn)
 
     # create model num_classes equal background + classes
     model = create_model(num_classes=args.num_classes + 1, load_pretrain_weights=args.pretrain)
@@ -133,7 +145,7 @@ def main(args):
     if args.train_dis:
         model_dis = EightwayASADiscriminator(num_classes = args.num_classes + 1)
         model_dis.to(device)
-        optimizer_dis = torch.optim.Adam(model_dis.parameters(), lr=args.lr, betas=(0.9,0.99))
+        optimizer_dis = torch.optim.Adam(model_dis.parameters(), lr=args.dis_lr, betas=(0.9,0.99))
     else:
         model_dis = None
         optimizer_dis = None
@@ -179,7 +191,7 @@ def main(args):
         lr_scheduler.step()
 
         # evaluate on the test dataset
-        det_info, seg_info = utils.evaluate(model, val_data_loader, device=device, results_file = args.results_file)
+        det_info, seg_info = utils.evaluate(model, tar_val_data_loader, device=device, results_file = args.results_file)
 
         # write detection into txt
         with open(det_results_file, "a") as f:
@@ -244,9 +256,12 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', default=40, type=int, metavar='N',
                         help='number of total epochs to run')
     # 学习率
-    parser.add_argument('--lr', default=0.004, type=float,
+    parser.add_argument('--lr', default=0.001, type=float,
                         help='initial learning rate, 0.02 is the default value for training '
                              'on 8 gpus and 2 images_per_gpu')
+    parser.add_argument('--dis-lr', default=0.0001, type=float,
+                    help='initial learning rate, 0.02 is the default value for training '
+                            'on 8 gpus and 2 images_per_gpu')
     # SGD的momentum参数
     parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                         help='momentum')
@@ -260,14 +275,14 @@ if __name__ == "__main__":
     # 针对torch.optim.lr_scheduler.MultiStepLR的参数
     parser.add_argument('--lr-gamma', default=0.1, type=float, help='decrease lr by a factor of lr-gamma')
     # 训练的batch size(如果内存/GPU显存充裕，建议设置更大)
-    parser.add_argument('--batch_size', default=2, type=int, metavar='N',
+    parser.add_argument('--batch_size', default=1, type=int, metavar='N',
                         help='batch size when training.')
     parser.add_argument('--aspect-ratio-group-factor', default=3, type=int)
     parser.add_argument("--pretrain", type=bool, default=True, help="load COCO pretrain weights.")
     # 是否使用混合精度训练(需要GPU支持混合精度)
     parser.add_argument("--amp", default=False, help="Use torch.cuda.amp for mixed precision training")
     parser.add_argument("--results_file", default="results_file", help="results_file")
-    parser.add_argument("--train_dis", default = False, help="train_dis")
+    parser.add_argument("--train_dis", default = True, help="train_dis")
 
     args = parser.parse_args()
     print(args)

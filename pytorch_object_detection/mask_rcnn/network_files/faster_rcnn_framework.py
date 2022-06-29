@@ -38,7 +38,7 @@ class FasterRCNNBase(nn.Module):
     def eager_outputs(self, losses, detections):
         # type: (Dict[str, Tensor], List[Dict[str, Tensor]]) -> Union[Dict[str, Tensor], List[Dict[str, Tensor]]]
         if self.training:
-            return losses
+            return detections, losses
 
         return detections
 
@@ -91,7 +91,7 @@ class FasterRCNNBase(nn.Module):
         proposals, proposal_losses = self.rpn(images, features, targets)
 
         # 将rpn生成的数据以及标注target信息传入fast rcnn后半部分
-        detections, mask_logits, detector_losses = self.roi_heads(features, proposals, images.image_sizes, targets)
+        detector_losses, mask_logits, detections = self.roi_heads(features, proposals, images.image_sizes, targets)
 
         # 对网络的预测结果进行后处理（主要将bboxes还原到原图像尺度上）
         detections = self.transform.postprocess(detections, images.image_sizes, original_image_sizes)
@@ -106,7 +106,7 @@ class FasterRCNNBase(nn.Module):
                 self._has_warned = True
             return losses, detections
         else:
-            return self.eager_outputs(losses, detections), mask_logits
+            return losses, mask_logits, detections
 
         # if self.training:
         #     return losses

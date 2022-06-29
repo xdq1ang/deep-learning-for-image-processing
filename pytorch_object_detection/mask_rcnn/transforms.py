@@ -58,7 +58,7 @@ class Resize(object):
         :return:
         """
         c, ih, iw = image.shape        
-        if ih > 256 and iw >512:
+        if ih > 256 or iw >512:
             # 对图像进行缩放并且进行长和宽的扭曲
             image = transforms.Resize((self.nh, self.nw))(image)
             target["masks"] = transforms.Resize((self.nh,self.nw),Image.NEAREST)(target["masks"])

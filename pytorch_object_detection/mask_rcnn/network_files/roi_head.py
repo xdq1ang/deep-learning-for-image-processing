@@ -506,17 +506,17 @@ class RoIHeads(torch.nn.Module):
                 "loss_classifier": loss_classifier,
                 "loss_box_reg": loss_box_reg
             }
-        else:
-            boxes, scores, labels = self.postprocess_detections(class_logits, box_regression, proposals, image_shapes)
-            num_images = len(boxes)
-            for i in range(num_images):
-                result.append(
-                    {
-                        "boxes": boxes[i],
-                        "labels": labels[i],
-                        "scores": scores[i],
-                    }
-                )
+        
+        boxes, scores, labels = self.postprocess_detections(class_logits, box_regression, proposals, image_shapes)
+        num_images = len(boxes)
+        for i in range(num_images):
+            result.append(
+                {
+                    "boxes": boxes[i],
+                    "labels": labels[i],
+                    "scores": scores[i],
+                }
+            )
 
         if self.has_mask():
             mask_proposals = [p["boxes"] for p in result]  # 将最终预测的Boxes信息取出
@@ -549,12 +549,12 @@ class RoIHeads(torch.nn.Module):
                 gt_labels = [t["labels"] for t in targets]
                 rcnn_loss_mask = maskrcnn_loss(mask_logits, mask_proposals, gt_masks, gt_labels, pos_matched_idxs)
                 loss_mask = {"loss_mask": rcnn_loss_mask}
-            else:
-                labels = [r["labels"] for r in result]
-                mask_probs = maskrcnn_inference(mask_logits, labels)
-                for mask_prob, r in zip(mask_probs, result):
-                    r["masks"] = mask_prob
+            
+            labels = [r["labels"] for r in result]
+            mask_probs = maskrcnn_inference(mask_logits, labels)
+            for mask_prob, r in zip(mask_probs, result):
+                r["masks"] = mask_prob
 
             losses.update(loss_mask)
 
-        return result, mask_logits, losses
+        return losses, mask_logits, result
