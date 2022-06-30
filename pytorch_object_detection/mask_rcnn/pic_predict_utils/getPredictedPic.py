@@ -50,9 +50,9 @@ def get_prediction(pred, threshold):  # 定义模型，并根据阈值过滤结�
         print("未检测到任何对象！")
         return [],[],[],[]
 
-    masks = (pred[0]['masks'] > 0.5).squeeze().detach().cpu().numpy()
-    pred_class = [PASCAL_VOC_INSTANCE_CATEGORY_NAMES[i] for i in list(pred[0]['labels'].numpy())]
-    pred_boxes = [[(i[0], i[1]), (i[2], i[3])] for i in list(pred[0]['boxes'].detach().numpy())]
+    masks = (pred[0]['masks'] > 0.5).squeeze(dim = 1).detach().cpu().numpy()
+    pred_class = [PASCAL_VOC_INSTANCE_CATEGORY_NAMES[i] for i in list(pred[0]['labels'].cpu().detach().numpy())]
+    pred_boxes = [[(i[0], i[1]), (i[2], i[3])] for i in list(pred[0]['boxes'].cpu().detach().numpy())]
     masks = masks[:pred_t + 1]
     pred_boxes = pred_boxes[:pred_t + 1]
     pred_class = pred_class[:pred_t + 1]

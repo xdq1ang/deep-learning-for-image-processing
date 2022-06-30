@@ -21,7 +21,7 @@ def train_one_epoch(model, model_dis, optimizer, optimizer_dis, data_loader, tar
     bce_loss = torch.nn.BCEWithLogitsLoss()
     source_label = 1
     target_label = 0
-    model_dis_alpah = 1
+    model_dis_alpah = 0.1
     one_epoch_dis_loss = 0
     one_epoch_adv_loss = 0
 
@@ -153,6 +153,14 @@ def train_one_epoch(model, model_dis, optimizer, optimizer_dis, data_loader, tar
 
 @torch.no_grad()
 def evaluate(model, data_loader, device, results_file):
+    save_path = "results_file/pre_pic"
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    folder = str(len(os.listdir(save_path)))
+    save_path = os.path.join(save_path,folder)
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+
     cpu_device = torch.device("cpu")
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -170,14 +178,7 @@ def evaluate(model, data_loader, device, results_file):
         model_time = time.time()
         _, _ , outputs= model(image)
         # 显示预测图
-        save_path = "results_file/pre_pic"
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
-        folder = str(len(os.listdir(save_path)))
-        save_path = os.path.join(save_path,folder)
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
-        instance_segmentation_api(image,outputs,save_path)
+        # instance_segmentation_api(image,outputs,save_path)
 
         outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
         model_time = time.time() - model_time

@@ -29,7 +29,7 @@ def create_model(num_classes, load_pretrain_weights=True):
 
     if load_pretrain_weights:
         # coco weights url: "https://download.pytorch.org/models/maskrcnn_resnet50_fpn_coco-bf2d0c1e.pth"
-        weights_dict = torch.load(r"save_weights\model_25.pth", map_location="cpu")
+        weights_dict = torch.load(r"preTrainedModel\maskrcnn_resnet50_fpn_coco.pth", map_location="cpu")
         for k in list(weights_dict.keys()):
             if ("box_predictor" in k) or ("mask_fcn_logits" in k):
                 del weights_dict[k]

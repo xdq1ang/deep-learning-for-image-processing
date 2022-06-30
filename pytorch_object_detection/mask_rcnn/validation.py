@@ -16,6 +16,7 @@ from network_files import MaskRCNN
 from my_dataset_coco import CocoDetection
 from my_dataset_voc import VOCInstances
 from train_utils import EvalCOCOMetric
+from pic_predict_utils.getPredictedPic import instance_segmentation_api
 
 
 def summarize(self, catId=None):
@@ -119,10 +120,16 @@ def save_info(coco_evaluator,
 
 
 def main(parser_data):
-    weights_name = args.weights_path.split("/")[-1][:-4]
-    save_path = os.path.join(args.results_file,weights_name)
+    # 评估结果文件保存路径
+    weights_name = args.weights_path.split("\\")[-1][:-4]+"_validation"
+    save_path = os.path.join(args.weights_path.split("\\")[0],args.weights_path.split("\\")[1],weights_name)
     if not os.path.exists(save_path):
         os.makedirs(save_path)
+    # 预测图文件保存路径
+    pic_save_path = os.path.join(save_path,"predict_pic")
+    if not os.path.exists(pic_save_path):
+        os.makedirs(pic_save_path)
+    
     device = torch.device(parser_data.device if torch.cuda.is_available() else "cpu")
     print("Using {} device training.".format(device.type))
 
@@ -146,7 +153,7 @@ def main(parser_data):
     # load validation data set
     # val_dataset = CocoDetection(data_root, "val", data_transform["val"])
     # VOCdevkit -> VOC2012 -> ImageSets -> Main -> val.txt
-    val_dataset = VOCInstances(data_root, year="2012", txt_name="val.txt", transforms=data_transform["val"])
+    val_dataset = VOCInstances(data_root, year="2007", txt_name="val.txt", transforms=data_transform["val"])
     val_dataset_loader = torch.utils.data.DataLoader(val_dataset,
                                                      batch_size=batch_size,
                                                      shuffle=False,
@@ -178,9 +185,9 @@ def main(parser_data):
             image = list(img.to(device) for img in image)
 
             # inference
-            outputs = model(image)
-
+            _, _, outputs = model(image)
             outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
+            instance_segmentation_api(image,outputs,pic_save_path)
             det_metric.update(targets, outputs)
             seg_metric.update(targets, outputs)
 
@@ -209,7 +216,7 @@ if __name__ == "__main__":
     parser.add_argument('--data-path', default='data/VOCdevkit', help='dataset root')
 
     # 训练好的权重文件
-    parser.add_argument('--weights-path', default='./save_weights/model_25.pth', type=str, help='training weights')
+    parser.add_argument('--weights-path', default=r'results_file\adv_train\save_weights\model_8.pth', type=str, help='training weights')
 
     # batch size(set to 1, don't change)
     parser.add_argument('--batch-size', default=1, type=int, metavar='N',
